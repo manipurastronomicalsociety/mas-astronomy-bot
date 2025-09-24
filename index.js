@@ -1,12 +1,23 @@
-// MAS Astronomy Daily Bot
-// Posts daily astronomy content to Discord
+// MAS Astronomy Daily Bot + Member Verification System
+// Posts daily astronomy content to Discord + handles member verification
 
 import fetch from 'node-fetch';
 import cron from 'node-cron';
+import { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes } from 'discord.js';
+import admin from 'firebase-admin';
 
 // Configuration from environment variables
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 const NASA_API_KEY = process.env.NASA_API_KEY;
+
+// Discord Bot Configuration (for verification system)
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
+const GUILD_ID = process.env.GUILD_ID; // Your Discord server ID
+const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID; // "MAS Member" role ID
+
+// Firebase Configuration (for member verification)
+const FIREBASE_CONFIG = process.env.FIREBASE_SERVICE_ACCOUNT ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT) : null;
 
 // Manipur coordinates (Imphal)
 const MANIPUR_LAT = 24.8170;
@@ -313,6 +324,159 @@ if (process.env.NODE_ENV !== 'production') {
 cron.schedule('0 * * * *', healthCheck, {
   timezone: "Asia/Kolkata"
 });
+
+// Initialize Discord Bot (for verification system)
+let discordClient = null;
+let firebaseDb = null;
+
+if (DISCORD_TOKEN && CLIENT_ID && GUILD_ID && MEMBER_ROLE_ID) {
+  // Initialize Firebase Admin (if config provided)
+  if (FIREBASE_CONFIG) {
+    try {
+      admin.initializeApp({
+        credential: admin.credential.cert(FIREBASE_CONFIG),
+      });
+      firebaseDb = admin.firestore();
+      console.log('🔥 Firebase Admin initialized for member verification');
+    } catch (error) {
+      console.error('❌ Firebase initialization failed:', error.message);
+    }
+  }
+
+  // Initialize Discord client
+  discordClient = new Client({
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
+  });
+
+  // Discord bot event handlers
+  discordClient.once('ready', () => {
+    console.log(`✅ Discord bot logged in as ${discordClient.user.tag}`);
+    console.log('🔐 Member verification system active');
+  });
+
+  // Handle slash commands
+  discordClient.on('interactionCreate', async (interaction) => {
+    if (!interaction.isChatInputCommand()) return;
+
+    if (interaction.commandName === 'verify') {
+      await handleVerificationCommand(interaction);
+    } else if (interaction.commandName === 'status') {
+      await handleStatusCommand(interaction);
+    }
+  });
+
+  // Login Discord bot
+  discordClient.login(DISCORD_TOKEN).catch(error => {
+    console.error('❌ Discord bot login failed:', error.message);
+  });
+} else {
+  console.log('⚠️  Discord bot credentials not provided - running in webhook-only mode');
+}
+
+// Member Verification Command Handlers
+async function handleVerificationCommand(interaction) {
+  const email = interaction.options.getString('email');
+
+  try {
+    // Defer reply since database lookup might take time
+    await interaction.deferReply({ ephemeral: true });
+
+    if (!firebaseDb) {
+      await interaction.editReply({
+        content: '❌ Verification system is currently unavailable. Please contact an admin.',
+      });
+      return;
+    }
+
+    // Search for member in Firebase
+    const memberSnapshot = await firebaseDb.collection('memberships')
+      .where('email', '==', email.toLowerCase())
+      .where('status', '==', 'approved')
+      .get();
+
+    if (memberSnapshot.empty) {
+      await interaction.editReply({
+        content: `❌ **Verification Failed**\n\nNo approved membership found for email: \`${email}\`\n\n**Next Steps:**\n• Check if you used the correct email address\n• Make sure your membership application has been approved\n• Apply for membership at: https://manipurastronomy.org/join\n• Contact admins if you believe this is an error`,
+      });
+      return;
+    }
+
+    const memberData = memberSnapshot.docs[0].data();
+    const member = interaction.member;
+
+    // Check if user already has the member role
+    if (member.roles.cache.has(MEMBER_ROLE_ID)) {
+      await interaction.editReply({
+        content: `✅ You are already verified as a MAS member!\n\n**Member Info:**\n• Name: ${memberData.fullName}\n• Status: Approved Member\n• Join Date: ${memberData.applicationDate || 'N/A'}`,
+      });
+      return;
+    }
+
+    // Assign member role
+    await member.roles.add(MEMBER_ROLE_ID);
+
+    // Update member record with Discord info (optional)
+    await firebaseDb.collection('memberships').doc(memberSnapshot.docs[0].id).update({
+      discordUserId: interaction.user.id,
+      discordUsername: interaction.user.username,
+      discordVerifiedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    await interaction.editReply({
+      content: `🎉 **Verification Successful!**\n\n**Welcome to the MAS Member community, ${memberData.fullName}!**\n\nYou now have access to:\n• 🔒 Member-only channels\n• 🎯 Priority event registration\n• 🔭 Equipment sharing access\n• 📚 Advanced astronomy discussions\n\n**Explore your new channels and connect with fellow astronomers!** ✨`,
+    });
+
+    // Log successful verification
+    console.log(`✅ Member verified: ${memberData.fullName} (${email}) - Discord: ${interaction.user.username}`);
+
+  } catch (error) {
+    console.error('❌ Verification error:', error);
+    await interaction.editReply({
+      content: '❌ An error occurred during verification. Please try again later or contact an admin.',
+    });
+  }
+}
+
+async function handleStatusCommand(interaction) {
+  try {
+    await interaction.deferReply({ ephemeral: true });
+
+    const member = interaction.member;
+    const isMember = member.roles.cache.has(MEMBER_ROLE_ID);
+
+    let statusMessage = `**Your MAS Discord Status:**\n\n`;
+    statusMessage += `👤 **Username:** ${interaction.user.username}\n`;
+    statusMessage += `🏷️ **Status:** ${isMember ? '✅ Verified MAS Member' : '🔄 Guest (Not Verified)'}\n`;
+    statusMessage += `📅 **Joined Discord:** ${member.joinedAt.toLocaleDateString()}\n\n`;
+
+    if (!isMember) {
+      statusMessage += `**To become a verified member:**\n`;
+      statusMessage += `1. Apply at: https://manipurastronomy.org/join\n`;
+      statusMessage += `2. Wait for admin approval\n`;
+      statusMessage += `3. Use \`/verify your-email@example.com\`\n\n`;
+      statusMessage += `**Benefits of membership:**\n`;
+      statusMessage += `• Access to member-only channels\n`;
+      statusMessage += `• Priority event registration\n`;
+      statusMessage += `• Equipment sharing privileges\n`;
+      statusMessage += `• Advanced astronomy resources`;
+    } else {
+      statusMessage += `**Your member benefits:**\n`;
+      statusMessage += `• 🔒 Access to all member channels\n`;
+      statusMessage += `• 🎯 Priority event registration\n`;
+      statusMessage += `• 🔭 Equipment sharing access\n`;
+      statusMessage += `• 📚 Advanced discussions\n\n`;
+      statusMessage += `Thank you for being a valued MAS member! 🌟`;
+    }
+
+    await interaction.editReply({ content: statusMessage });
+
+  } catch (error) {
+    console.error('❌ Status command error:', error);
+    await interaction.editReply({
+      content: '❌ Unable to retrieve status. Please try again later.',
+    });
+  }
+}
 
 console.log('🚀 MAS Astronomy Bot started!');
 console.log('📅 Scheduled to post daily at 8:00 AM IST');
