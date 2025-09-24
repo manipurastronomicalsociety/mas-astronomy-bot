@@ -1,6 +1,7 @@
 {
   "name": "mas-astronomy-bot",
   "version": "1.0.0",
+  "type": "module",
   "description": "Daily astronomy content bot for Manipur Astronomical Society Discord server",
   "main": "index.js",
   "scripts": {
