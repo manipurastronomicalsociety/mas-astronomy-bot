@@ -167,6 +167,87 @@ const commands = [
     ),
 
   new SlashCommandBuilder()
+    .setName('member-list')
+    .setDescription('[ADMIN ONLY] List MAS members with optional status filtering')
+    .addStringOption(option =>
+      option
+        .setName('status')
+        .setDescription('Filter by membership status (optional)')
+        .setRequired(false)
+        .addChoices(
+          { name: 'All (default)', value: 'all' },
+          { name: 'Pending Review', value: 'pending' },
+          { name: 'Approved', value: 'approved' },
+          { name: 'Rejected', value: 'rejected' }
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName('member-status')
+    .setDescription('[ADMIN ONLY] Change membership application status')
+    .addStringOption(option =>
+      option
+        .setName('email')
+        .setDescription('Email of the member application to update')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName('action')
+        .setDescription('Action to take on the application')
+        .setRequired(true)
+        .addChoices(
+          { name: 'Approve Application', value: 'approve' },
+          { name: 'Reject Application', value: 'reject' },
+          { name: 'Set to Pending', value: 'pending' }
+        )
+    )
+    .addStringOption(option =>
+      option
+        .setName('reason')
+        .setDescription('Reason for the status change (optional)')
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('send-welcome-emails')
+    .setDescription('[ADMIN ONLY] Send welcome emails to approved members who haven\'t joined Discord')
+    .addStringOption(option =>
+      option
+        .setName('filter')
+        .setDescription('Which approved members to email')
+        .setRequired(false)
+        .addChoices(
+          { name: 'All Approved (not Discord verified)', value: 'unverified' },
+          { name: 'All Approved Members', value: 'all' },
+          { name: 'Specific Member by Email', value: 'specific' },
+          { name: 'Test Email to Admin', value: 'test' }
+        )
+    )
+    .addStringOption(option =>
+      option
+        .setName('email')
+        .setDescription('Email of specific member (only used with "Specific Member by Email")')
+        .setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName('admin-verify')
+    .setDescription('[ADMIN ONLY] Manually verify a member by connecting their Discord to their email')
+    .addUserOption(option =>
+      option
+        .setName('user')
+        .setDescription('Discord user to verify (use @username)')
+        .setRequired(true)
+    )
+    .addStringOption(option =>
+      option
+        .setName('email')
+        .setDescription('Email address of the approved member')
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
     .setName('poll')
     .setDescription('[ADMIN ONLY] Create a poll for community engagement')
     .addStringOption(option =>
@@ -446,7 +527,23 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName('astronomer')
-    .setDescription('Learn about a famous astronomer and their contributions to science! 👨‍🚀🔭')
+    .setDescription('Learn about a famous astronomer and their contributions to science! 👨‍🚀🔭'),
+
+  new SlashCommandBuilder()
+    .setName('resources')
+    .setDescription('Find the best free astronomy educational resources for students! 📚🔭')
+    .addStringOption(option =>
+      option
+        .setName('type')
+        .setDescription('What type of resources do you need?')
+        .setRequired(false)
+        .addChoices(
+          { name: '📚 General Education', value: 'general' },
+          { name: '🎓 Free Courses', value: 'courses' },
+          { name: '🔬 Research Papers', value: 'research' },
+          { name: '🇮🇳 Indian Institutions', value: 'indian' }
+        )
+    )
 ].map(command => command.toJSON());
 
 const rest = new REST().setToken(DISCORD_TOKEN);

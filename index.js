@@ -6,6 +6,7 @@ import cron from 'node-cron';
 import { Client, GatewayIntentBits, SlashCommandBuilder, REST, Routes } from 'discord.js';
 import admin from 'firebase-admin';
 import dotenv from 'dotenv';
+import nodemailer from 'nodemailer';
 
 // Load environment variables
 dotenv.config();
@@ -14,12 +15,26 @@ dotenv.config();
 const DISCORD_WEBHOOK_URL = process.env.DISCORD_WEBHOOK_URL;
 const NASA_API_KEY = process.env.NASA_API_KEY;
 
+// Email configuration (optional)
+const EMAIL_SERVICE = process.env.EMAIL_SERVICE || 'gmail'; // gmail, outlook, etc.
+const EMAIL_USER = process.env.EMAIL_USER; // your email
+const EMAIL_PASS = process.env.EMAIL_PASS; // your app password
+const EMAIL_FROM_NAME = process.env.EMAIL_FROM_NAME || 'Manipur Astronomical Society';
+
 // Discord Bot Configuration (for verification system)
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID; // Your Discord server ID
 const MEMBER_ROLE_ID = process.env.MEMBER_ROLE_ID; // "MAS Member" role ID
 const ADMIN_USER_IDS = process.env.ADMIN_USER_IDS ? process.env.ADMIN_USER_IDS.split(',').map(id => id.trim()) : []; // Admin Discord user IDs
+
+// Private members channel configuration
+const MEMBERS_CHANNEL_ID = '1422095731912605758'; // mas-members channel ID
+const MEMBERS_WEBHOOK_URL = 'https://discord.com/api/webhooks/1422096049786585210/p3gpIpsmabYjPtzn3mL-IALk8c9upTntHiekeoPRhgvQzGMv0BWfx0T_3yPxCbSBM-8U';
+
+// Private members forum channel configuration
+const MEMBERS_FORUM_CHANNEL_ID = '1422095485774069832'; // mas-members forum channel ID
+const MEMBERS_FORUM_WEBHOOK_URL = 'https://discord.com/api/webhooks/1422096841670922381/VprZ4aKkPWhBM0ZQhi0zeKuGZo-T9O2mToWBwIuFCe5mS6qt47VAn_R5hOnctMc1e2wB';
 
 // Firebase Configuration (for member verification)
 const FIREBASE_CONFIG = process.env.FIREBASE_SERVICE_ACCOUNT ? JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT) : null;
@@ -426,6 +441,76 @@ function getRandomAstronomer() {
   return astronomers[Math.floor(Math.random() * astronomers.length)];
 }
 
+// Educational resources database (free sources)
+const educationalResources = {
+  general: [
+    {
+      name: "NASA Education Hub",
+      url: "https://science.nasa.gov/learn/",
+      description: "NASA's comprehensive educational materials (public domain)",
+      type: "Official NASA content"
+    },
+    {
+      name: "IAU Astronomy Glossary",
+      url: "https://astro4edu.org/resources/glossary/search/",
+      description: "International Astronomical Union educational definitions",
+      type: "Professional definitions"
+    },
+    {
+      name: "Wikipedia Astronomy Portal",
+      url: "https://en.wikipedia.org/wiki/Portal:Astronomy",
+      description: "Free encyclopedia with thousands of astronomy articles",
+      type: "Comprehensive reference"
+    }
+  ],
+  courses: [
+    {
+      name: "Coursera Astronomy Courses",
+      url: "https://www.coursera.org/courses?query=astronomy",
+      description: "Free online astronomy courses from universities",
+      type: "University courses"
+    },
+    {
+      name: "Khan Academy Cosmology",
+      url: "https://www.khanacademy.org/science/cosmology-and-astronomy",
+      description: "Free video lessons on astronomy and cosmology",
+      type: "Video lessons"
+    }
+  ],
+  research: [
+    {
+      name: "NASA ADS (Astrophysics Data System)",
+      url: "https://ui.adsabs.harvard.edu/",
+      description: "Search millions of astronomy research papers",
+      type: "Research database"
+    },
+    {
+      name: "arXiv Astrophysics",
+      url: "https://arxiv.org/list/astro-ph/recent",
+      description: "Latest astronomy research preprints",
+      type: "Current research"
+    }
+  ],
+  indian: [
+    {
+      name: "Indian Institute of Astrophysics",
+      url: "https://www.iiap.res.in/",
+      description: "Premier astronomy research institute in India",
+      type: "Indian institution"
+    },
+    {
+      name: "IUCAA (Pune)",
+      url: "https://www.iucaa.in/",
+      description: "Inter-University Centre for Astronomy and Astrophysics",
+      type: "Indian university center"
+    }
+  ]
+};
+
+function getEducationalResources(category = 'general') {
+  return educationalResources[category] || educationalResources.general;
+}
+
 // Track last post to prevent duplicates
 let lastPostTime = 0;
 
@@ -666,6 +751,25 @@ cron.schedule('0 * * * *', healthCheck, {
   timezone: "Asia/Kolkata"
 });
 
+// Initialize Email Transporter (optional)
+let emailTransporter = null;
+if (EMAIL_USER && EMAIL_PASS) {
+  try {
+    emailTransporter = nodemailer.createTransport({
+      service: EMAIL_SERVICE,
+      auth: {
+        user: EMAIL_USER,
+        pass: EMAIL_PASS
+      }
+    });
+    console.log('✅ Email transporter initialized');
+  } catch (error) {
+    console.error('⚠️ Email transporter setup failed:', error.message);
+  }
+} else {
+  console.log('⚠️ Email credentials not provided - email notifications disabled');
+}
+
 // Initialize Discord Bot (for verification system)
 let discordClient = null;
 let firebaseDb = null;
@@ -717,6 +821,14 @@ if (DISCORD_TOKEN && CLIENT_ID && GUILD_ID && MEMBER_ROLE_ID) {
       await handleCleanChatCommand(interaction);
     } else if (interaction.commandName === 'member-info') {
       await handleMemberInfoCommand(interaction);
+    } else if (interaction.commandName === 'member-list') {
+      await handleMemberListCommand(interaction);
+    } else if (interaction.commandName === 'member-status') {
+      await handleMemberStatusCommand(interaction);
+    } else if (interaction.commandName === 'send-welcome-emails') {
+      await handleSendWelcomeEmailsCommand(interaction);
+    } else if (interaction.commandName === 'admin-verify') {
+      await handleAdminVerifyCommand(interaction);
     } else if (interaction.commandName === 'poll') {
       await handlePollCommand(interaction);
     } else if (interaction.commandName === 'add-admin') {
@@ -743,6 +855,8 @@ if (DISCORD_TOKEN && CLIENT_ID && GUILD_ID && MEMBER_ROLE_ID) {
       await handleSpaceMusicCommand(interaction);
     } else if (interaction.commandName === 'astronomer') {
       await handleAstronomerCommand(interaction);
+    } else if (interaction.commandName === 'resources') {
+      await handleResourcesCommand(interaction);
     }
   });
 
@@ -787,8 +901,33 @@ async function handleVerificationCommand(interaction) {
 
     // Check if user already has the member role
     if (member.roles.cache.has(MEMBER_ROLE_ID)) {
+      // Already verified, but let's ensure they have private channel access (for users who verified before private channels were added)
+      let addedToChannels = false;
+
+      try {
+        // Add to both private channels (for users who verified before this feature)
+
+        // 1. Add to main mas-members channel
+        const membersChannel = await interaction.guild.channels.fetch(MEMBERS_CHANNEL_ID);
+        if (membersChannel) {
+          await membersChannel.permissionOverwrites.edit(interaction.user.id, {
+            ViewChannel: true,
+            SendMessages: true,
+            ReadMessageHistory: true
+          });
+          console.log(`✅ Added main members channel permissions for ${interaction.user.username}`);
+        }
+
+        // 2. Add to mas-members forum
+        await addToMembersForumChannel(interaction.user, interaction.guild);
+
+        addedToChannels = true;
+      } catch (channelError) {
+        console.error('⚠️ Failed to add verified user to private channels:', channelError);
+      }
+
       await interaction.editReply({
-        content: `✅ You are already verified as a MAS member!\n\n**Member Info:**\n• Name: ${memberData.fullName}\n• Status: Approved Member\n• Join Date: ${memberData.applicationDate || 'N/A'}`,
+        content: `✅ You are already verified as a MAS member!\n\n**Member Info:**\n• Name: ${memberData.fullName}\n• Status: Approved Member\n• Join Date: ${memberData.applicationDate || 'N/A'}\n\n${addedToChannels ? '🔄 **Updated:** Added access to private member channels!' : '📱 **Note:** You have access to all member channels'}`,
       });
       return;
     }
@@ -804,8 +943,34 @@ async function handleVerificationCommand(interaction) {
     });
 
     await interaction.editReply({
-      content: `🎉 **Verification Successful!**\n\n**Welcome to the MAS Member community, ${memberData.fullName}!**\n\nYou now have access to:\n• 🔒 Member-only channels\n• 🎯 Priority event registration\n• 🔭 Equipment sharing access\n• 📚 Advanced astronomy discussions\n\n**Explore your new channels and connect with fellow astronomers!** ✨`,
+      content: `🎉 **Verification Successful!**\n\n**Welcome to the MAS Member community, ${memberData.fullName}!**\n\nYou now have access to:\n• 🔒 **Member-only channels** (including <#${MEMBERS_CHANNEL_ID}>)\n• 💬 **Private members forum** (<#${MEMBERS_FORUM_CHANNEL_ID}>)\n• 🎯 Priority event registration\n• 🔭 Equipment sharing access\n• 📚 Advanced astronomy discussions\n• 🎁 Exclusive member-only content\n\n**Check out <#${MEMBERS_CHANNEL_ID}> to introduce yourself to fellow members!** ✨`,
     });
+
+    // Add permissions and send welcome messages to both private channels
+    try {
+      // 1. Add to main mas-members channel
+      const membersChannel = await interaction.guild.channels.fetch(MEMBERS_CHANNEL_ID);
+      if (membersChannel) {
+        await membersChannel.permissionOverwrites.edit(interaction.user.id, {
+          ViewChannel: true,
+          SendMessages: true,
+          ReadMessageHistory: true
+        });
+        console.log(`✅ Added main members channel permissions for ${interaction.user.username}`);
+      }
+
+      // Send welcome message to main members channel
+      await sendMembersChannelWelcome(memberData, interaction.user);
+    } catch (welcomeError) {
+      console.error('⚠️ Failed to add user to main members channel:', welcomeError);
+    }
+
+    // 2. Add to mas-members forum with permissions
+    try {
+      await addToMembersForumChannel(interaction.user, interaction.guild);
+    } catch (forumError) {
+      console.error('⚠️ Failed to add user to members forum:', forumError);
+    }
 
     // Log successful verification
     console.log(`✅ Member verified: ${memberData.fullName} (${email}) - Discord: ${interaction.user.username}`);
@@ -1423,6 +1588,691 @@ async function handleMemberInfoCommand(interaction) {
   }
 }
 
+async function handleMemberListCommand(interaction) {
+  try {
+    // Check admin permissions
+    if (!(await isAdmin(interaction.member))) {
+      await interaction.reply({
+        content: '❌ This command is restricted to administrators only.',
+        ephemeral: true
+      });
+      return;
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    if (!firebaseDb) {
+      await interaction.editReply({
+        content: '❌ Database connection not available.'
+      });
+      return;
+    }
+
+    // Get status filter option
+    const statusFilter = interaction.options.getString('status') || 'all';
+
+    // Build query based on filter
+    let query = firebaseDb.collection('membershipApplications');
+
+    if (statusFilter !== 'all') {
+      query = query.where('status', '==', statusFilter);
+    }
+
+    const membersSnapshot = await query.orderBy('applicationDate', 'desc').get();
+
+    if (membersSnapshot.empty) {
+      const filterText = statusFilter === 'all' ? 'membership applications' : `${statusFilter} applications`;
+      await interaction.editReply({
+        content: `📋 No ${filterText} found in the database.`
+      });
+      return;
+    }
+
+    const members = [];
+    let verifiedOnDiscord = 0;
+    let approvedMembers = 0;
+    const statusCounts = {};
+
+    membersSnapshot.forEach(doc => {
+      const memberData = doc.data();
+      members.push(memberData);
+
+      // Count Discord verifications
+      if (memberData.discordUserId) {
+        verifiedOnDiscord++;
+      }
+
+      // Count approved members
+      if (memberData.status === 'approved') {
+        approvedMembers++;
+      }
+
+      // Count by status
+      const status = memberData.status || 'pending';
+      statusCounts[status] = (statusCounts[status] || 0) + 1;
+    });
+
+    // Create embed with member list
+    const statusSummary = Object.entries(statusCounts)
+      .map(([status, count]) => `${status}: ${count}`)
+      .join(' | ');
+
+    const filterDisplay = statusFilter === 'all' ? 'All Statuses' : `${statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1)} Only`;
+
+    const embed = {
+      title: `📋 MAS Member List (${filterDisplay})`,
+      description: statusFilter === 'all'
+        ? `**Total applications: ${members.length}**\n**Approved: ${approvedMembers}** | **Discord verified: ${verifiedOnDiscord}**\n\n**Status breakdown:** ${statusSummary}`
+        : `**${statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1)} applications: ${members.length}**\n**Discord verified: ${verifiedOnDiscord}**`,
+      color: statusFilter === 'pending' ? 0xfbbf24 : // Yellow for pending
+             statusFilter === 'approved' ? 0x10b981 : // Green for approved
+             statusFilter === 'rejected' ? 0xef4444 : // Red for rejected
+             0x3b82f6, // Blue for all
+      fields: [],
+      footer: {
+        text: "🔐 Admin Only • MAS Member Database",
+        icon_url: "https://manipurastronomy.org/logo.png"
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    // Group members in chunks for better display (reduced to prevent field length limit)
+    const MEMBERS_PER_FIELD = 5;
+    const memberChunks = [];
+
+    for (let i = 0; i < members.length; i += MEMBERS_PER_FIELD) {
+      memberChunks.push(members.slice(i, i + MEMBERS_PER_FIELD));
+    }
+
+    memberChunks.forEach((chunk, index) => {
+      let fieldValue = '';
+      chunk.forEach((member, memberIndex) => {
+        const globalIndex = index * MEMBERS_PER_FIELD + memberIndex + 1;
+        const discordStatus = member.discordUserId ? '✅' : '❌';
+        const verifiedDate = member.discordVerifiedAt ?
+          new Date(member.discordVerifiedAt.toDate()).toLocaleDateString() : 'Not verified';
+        const applicationDate = member.applicationDate ?
+          new Date(member.applicationDate.toDate()).toLocaleDateString() : 'Unknown';
+
+        // Status emoji
+        const statusEmoji = member.status === 'approved' ? '✅' :
+                           member.status === 'rejected' ? '❌' :
+                           member.status === 'pending' ? '⏳' : '❓';
+
+        fieldValue += `**${globalIndex}.** ${member.fullName || member.name || 'Unknown'}\n`;
+        fieldValue += `   📧 ${member.email || 'No email'}\n`;
+        fieldValue += `   ${statusEmoji} **${member.status || 'pending'}** | ${discordStatus} ${member.discordUsername || 'Not linked'}\n`;
+        fieldValue += `   📅 ${applicationDate} | 📍 ${member.city || 'N/A'}\n\n`;
+      });
+
+      // Ensure field value doesn't exceed Discord's 1024 character limit
+      let finalFieldValue = fieldValue.trim();
+      if (finalFieldValue.length > 1024) {
+        finalFieldValue = finalFieldValue.substring(0, 1021) + '...';
+      }
+
+      embed.fields.push({
+        name: `Members ${index * MEMBERS_PER_FIELD + 1}-${Math.min((index + 1) * MEMBERS_PER_FIELD, members.length)}`,
+        value: finalFieldValue,
+        inline: false
+      });
+    });
+
+    // If embed is too large, split into multiple messages
+    if (JSON.stringify(embed).length > 5000 || embed.fields.length > 25) {
+      // Send summary first
+      const summaryEmbed = {
+        title: `📋 MAS Member List Summary (${filterDisplay})`,
+        description: statusFilter === 'all'
+          ? `**Total applications: ${members.length}**\n**Approved: ${approvedMembers}** | **Discord verified: ${verifiedOnDiscord}**\n\n**Status breakdown:** ${statusSummary}`
+          : `**${statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1)} applications: ${members.length}**\n**Discord verified: ${verifiedOnDiscord}**`,
+        color: statusFilter === 'pending' ? 0xfbbf24 :
+               statusFilter === 'approved' ? 0x10b981 :
+               statusFilter === 'rejected' ? 0xef4444 :
+               0x3b82f6,
+        footer: {
+          text: "🔐 Admin Only • MAS Member Database",
+          icon_url: "https://manipurastronomy.org/logo.png"
+        },
+        timestamp: new Date().toISOString()
+      };
+
+      await interaction.editReply({
+        embeds: [summaryEmbed]
+      });
+
+      // Send detailed list as follow-up
+      const memberList = members.map((member, index) => {
+        const discordStatus = member.discordUserId ? '✅' : '❌';
+        const statusEmoji = member.status === 'approved' ? '✅' :
+                           member.status === 'rejected' ? '❌' :
+                           member.status === 'pending' ? '⏳' : '❓';
+        return `**${index + 1}.** ${member.fullName || member.name || 'Unknown'} (${member.email || 'No email'}) ${statusEmoji}${member.status} ${discordStatus}Discord`;
+      }).join('\n');
+
+      const chunks = memberList.match(/.{1,1900}/g) || [memberList];
+
+      for (const chunk of chunks) {
+        await interaction.followUp({
+          content: `\`\`\`\n${chunk}\n\`\`\``,
+          ephemeral: true
+        });
+      }
+    } else {
+      await interaction.editReply({
+        embeds: [embed]
+      });
+    }
+
+    console.log(`📋 Member list requested by admin: ${interaction.user.username} (${members.length} members)`);
+
+  } catch (error) {
+    console.error('❌ Member list command error:', error);
+    await interaction.editReply({
+      content: '❌ Failed to retrieve member list. Please try again.',
+    });
+  }
+}
+
+async function handleMemberStatusCommand(interaction) {
+  try {
+    // Check admin permissions
+    if (!(await isAdmin(interaction.member))) {
+      await interaction.reply({
+        content: '❌ This command is restricted to administrators only.',
+        ephemeral: true
+      });
+      return;
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    if (!firebaseDb) {
+      await interaction.editReply({
+        content: '❌ Database connection not available.'
+      });
+      return;
+    }
+
+    const email = interaction.options.getString('email').toLowerCase();
+    const action = interaction.options.getString('action');
+    const reason = interaction.options.getString('reason') || 'Updated by admin';
+
+    // Find the member application
+    const memberSnapshot = await firebaseDb.collection('membershipApplications')
+      .where('email', '==', email)
+      .get();
+
+    if (memberSnapshot.empty) {
+      await interaction.editReply({
+        content: `❌ No membership application found for email: ${email}`
+      });
+      return;
+    }
+
+    const memberDoc = memberSnapshot.docs[0];
+    const memberData = memberDoc.data();
+    const currentStatus = memberData.status || 'pending';
+
+    // Determine new status
+    const newStatus = action === 'approve' ? 'approved' :
+                     action === 'reject' ? 'rejected' :
+                     'pending';
+
+    if (currentStatus === newStatus) {
+      await interaction.editReply({
+        content: `⚠️ Member **${memberData.fullName || email}** is already **${newStatus}**.`
+      });
+      return;
+    }
+
+    // Update the status
+    const updateData = {
+      status: newStatus,
+      reviewDate: admin.firestore.FieldValue.serverTimestamp(),
+      reviewed: true,
+      adminComments: reason,
+      reviewedBy: interaction.user.username
+    };
+
+    await firebaseDb.collection('membershipApplications').doc(memberDoc.id).update(updateData);
+
+    // Create response embed
+    const statusEmoji = newStatus === 'approved' ? '✅' :
+                       newStatus === 'rejected' ? '❌' :
+                       '⏳';
+
+    const embed = {
+      title: `${statusEmoji} Membership Status Updated`,
+      description: `**Member:** ${memberData.fullName || memberData.name || email}\n**Email:** ${email}`,
+      color: newStatus === 'approved' ? 0x10b981 : // Green
+             newStatus === 'rejected' ? 0xef4444 : // Red
+             0xfbbf24, // Yellow
+      fields: [
+        {
+          name: "Status Change",
+          value: `${currentStatus} → **${newStatus}**`,
+          inline: true
+        },
+        {
+          name: "Updated By",
+          value: interaction.user.username,
+          inline: true
+        },
+        {
+          name: "Reason",
+          value: reason,
+          inline: false
+        }
+      ],
+      footer: {
+        text: "🔐 Admin Action • MAS Member Management",
+        icon_url: "https://manipurastronomy.org/logo.png"
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    await interaction.editReply({
+      embeds: [embed]
+    });
+
+    // If approved, try to notify the member if they're verified on Discord
+    if (newStatus === 'approved' && memberData.discordUserId) {
+      try {
+        const guild = interaction.guild;
+        const member = await guild.members.fetch(memberData.discordUserId);
+
+        if (member) {
+          await member.send({
+            embeds: [{
+              title: "🎉 MAS Membership Approved!",
+              description: `Congratulations! Your membership application has been approved by the MAS admin team.`,
+              color: 0x10b981,
+              fields: [
+                {
+                  name: "Next Steps",
+                  value: "You now have full access to all MAS Discord channels and events. Welcome to the community!",
+                  inline: false
+                }
+              ],
+              footer: {
+                text: "Welcome to MAS! • Manipur Astronomical Society",
+                icon_url: "https://manipurastronomy.org/logo.png"
+              }
+            }]
+          });
+        }
+      } catch (dmError) {
+        console.log(`Could not send DM to approved member ${memberData.discordUsername}: ${dmError.message}`);
+      }
+    }
+
+    // Send welcome email if member was approved
+    if (newStatus === 'approved') {
+      try {
+        await sendWelcomeEmail(memberData);
+      } catch (emailError) {
+        console.error('⚠️ Failed to send welcome email:', emailError);
+      }
+    }
+
+    console.log(`📋 Member status updated: ${email} → ${newStatus} by ${interaction.user.username}`);
+
+  } catch (error) {
+    console.error('❌ Member status command error:', error);
+    await interaction.editReply({
+      content: '❌ Failed to update member status. Please try again.',
+    });
+  }
+}
+
+async function handleSendWelcomeEmailsCommand(interaction) {
+  try {
+    // Check admin permissions
+    if (!(await isAdmin(interaction.member))) {
+      await interaction.reply({
+        content: '❌ This command is restricted to administrators only.',
+        ephemeral: true
+      });
+      return;
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    if (!emailTransporter) {
+      await interaction.editReply({
+        content: '❌ Email system is not configured. Please set up email credentials in the .env file.',
+      });
+      return;
+    }
+
+    if (!firebaseDb) {
+      await interaction.editReply({
+        content: '❌ Database connection not available.'
+      });
+      return;
+    }
+
+    const filter = interaction.options.getString('filter') || 'unverified';
+    const specificEmail = interaction.options.getString('email');
+
+    if (filter === 'specific') {
+      // Send email to specific member
+      if (!specificEmail) {
+        await interaction.editReply({
+          content: '❌ **Email address required!**\n\nWhen using "Specific Member by Email", you must provide the email address in the `email` parameter.\n\nExample: `/send-welcome-emails filter:Specific Member by Email email:member@example.com`'
+        });
+        return;
+      }
+
+      // Find the specific member
+      const memberSnapshot = await firebaseDb.collection('membershipApplications')
+        .where('email', '==', specificEmail.toLowerCase())
+        .where('status', '==', 'approved')
+        .get();
+
+      if (memberSnapshot.empty) {
+        await interaction.editReply({
+          content: `❌ **Member not found!**\n\nNo approved member found with email: \`${specificEmail}\`\n\n**Possible reasons:**\n• Email address is incorrect\n• Member is not approved yet\n• Member doesn't exist in database`
+        });
+        return;
+      }
+
+      const memberData = memberSnapshot.docs[0].data();
+      const discordStatus = memberData.discordUserId ? '✅ Already verified' : '❌ Not verified';
+
+      try {
+        // Use Discord invite email for already approved members
+        await sendDiscordInviteEmail(memberData);
+        await interaction.editReply({
+          content: `✅ **Welcome email sent successfully!**\n\n👤 **Member:** ${memberData.fullName || memberData.name || specificEmail}\n📧 **Email:** ${specificEmail}\n🔗 **Discord Status:** ${discordStatus}\n\n📬 The member should receive the welcome email shortly with Discord invite and verification instructions.`
+        });
+      } catch (emailError) {
+        await interaction.editReply({
+          content: `❌ **Failed to send email to ${specificEmail}**\n\nError: ${emailError.message}`
+        });
+      }
+      return;
+    }
+
+    if (filter === 'test') {
+      // Send test email to admin (using the configured email address)
+      const testMemberData = {
+        fullName: 'Test User (Admin)',
+        email: EMAIL_USER, // Use the actual configured email address
+        city: 'Imphal',
+        state: 'Manipur',
+        organization: 'Test Organization'
+      };
+
+      try {
+        await sendWelcomeEmail(testMemberData);
+        await interaction.editReply({
+          content: '✅ **Test email sent successfully!**\n\nCheck the bot console logs to verify email delivery. The test email was sent to demonstrate the email format and delivery system.'
+        });
+      } catch (emailError) {
+        await interaction.editReply({
+          content: `❌ **Test email failed:** ${emailError.message}`
+        });
+      }
+      return;
+    }
+
+    // Get approved members based on filter
+    let query = firebaseDb.collection('membershipApplications')
+      .where('status', '==', 'approved');
+
+    // First, let's get ALL approved members to understand the database state
+    const allApprovedSnapshot = await firebaseDb.collection('membershipApplications')
+      .where('status', '==', 'approved')
+      .get();
+
+    if (allApprovedSnapshot.empty) {
+      await interaction.editReply({
+        content: `📋 **No approved members found in database at all.**\n\nThis means either:\n• No members have been approved yet\n• Members are stored with different status values\n• Database connection issue\n\nTry using \`/member-list status:all\` to see all members.`
+      });
+      return;
+    }
+
+    // Analyze the approved members
+    const allApproved = [];
+    let verifiedCount = 0;
+    let unverifiedCount = 0;
+
+    allApprovedSnapshot.forEach(doc => {
+      const memberData = doc.data();
+      allApproved.push(memberData);
+
+      if (memberData.discordUserId) {
+        verifiedCount++;
+      } else {
+        unverifiedCount++;
+      }
+    });
+
+    // Now apply the filter
+    let targetMembers = [];
+    if (filter === 'unverified') {
+      targetMembers = allApproved.filter(member => !member.discordUserId);
+    } else {
+      targetMembers = allApproved;
+    }
+
+    // Show detailed status if no unverified members found
+    if (filter === 'unverified' && targetMembers.length === 0) {
+      await interaction.editReply({
+        content: `📊 **Database Analysis:**\n\n**Total approved members:** ${allApproved.length}\n• ✅ **Discord verified:** ${verifiedCount}\n• ❌ **Not Discord verified:** ${unverifiedCount}\n\n🎉 **Good news!** All your approved members have already joined and verified on Discord!\n\n💡 **Options:**\n• Use \`filter:All Approved Members\` to send announcement emails\n• Use \`filter:Specific Member by Email\` for individual follow-ups\n• Use \`/member-list\` to see detailed member status`
+      });
+      return;
+    }
+
+    const membersSnapshot = { docs: targetMembers.map(member => ({ data: () => member })) };
+
+    if (targetMembers.length === 0) {
+      const filterText = filter === 'unverified' ? 'approved members without Discord verification' : 'approved members';
+      await interaction.editReply({
+        content: `📋 No ${filterText} found in the database.`
+      });
+      return;
+    }
+
+    const members = targetMembers;
+
+    await interaction.editReply({
+      content: `📧 **Starting email campaign...**\n\nFound **${members.length}** ${filter === 'unverified' ? 'unverified' : ''} approved members. Sending welcome emails now...\n\n*This may take a few moments. Check console logs for detailed progress.*`
+    });
+
+    // Send emails to all found members
+    let successCount = 0;
+    let failCount = 0;
+    const results = [];
+
+    for (let i = 0; i < members.length; i++) {
+      const member = members[i];
+      try {
+        // Use appropriate email based on context - for already approved members, use Discord invite email
+        const emailSent = await sendDiscordInviteEmail(member);
+        if (emailSent) {
+          successCount++;
+          results.push(`✅ ${member.fullName || member.email}`);
+        } else {
+          failCount++;
+          results.push(`❌ ${member.fullName || member.email} (Failed)`);
+        }
+
+        // Add small delay between emails to avoid rate limiting
+        if (i < members.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
+        }
+      } catch (error) {
+        failCount++;
+        results.push(`❌ ${member.fullName || member.email} (Error: ${error.message})`);
+        console.error(`Failed to send email to ${member.email}:`, error);
+      }
+    }
+
+    // Send final results
+    const resultSummary = `🎉 **Email Campaign Complete!**\n\n📊 **Results:**\n• ✅ **Successfully sent:** ${successCount}\n• ❌ **Failed:** ${failCount}\n• 📧 **Total attempted:** ${members.length}\n\n**Details:**\n${results.slice(0, 10).join('\n')}${results.length > 10 ? `\n... and ${results.length - 10} more` : ''}`;
+
+    await interaction.followUp({
+      content: resultSummary,
+      ephemeral: true
+    });
+
+    console.log(`📧 Welcome email campaign completed: ${successCount} sent, ${failCount} failed`);
+
+  } catch (error) {
+    console.error('❌ Send welcome emails command error:', error);
+    await interaction.editReply({
+      content: '❌ Failed to send welcome emails. Please try again.',
+    });
+  }
+}
+
+async function handleAdminVerifyCommand(interaction) {
+  try {
+    // Check admin permissions
+    if (!(await isAdmin(interaction.member))) {
+      await interaction.reply({
+        content: '❌ This command is restricted to administrators only.',
+        ephemeral: true
+      });
+      return;
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    if (!firebaseDb) {
+      await interaction.editReply({
+        content: '❌ Database connection not available.'
+      });
+      return;
+    }
+
+    const targetUser = interaction.options.getUser('user');
+    const email = interaction.options.getString('email').toLowerCase();
+    const targetMember = interaction.guild.members.cache.get(targetUser.id);
+
+    if (!targetMember) {
+      await interaction.editReply({
+        content: `❌ **User not found in server**\n\n${targetUser.username} is not a member of this Discord server.`
+      });
+      return;
+    }
+
+    // Search for member in Firebase by email
+    const memberSnapshot = await firebaseDb.collection('membershipApplications')
+      .where('email', '==', email)
+      .where('status', '==', 'approved')
+      .get();
+
+    if (memberSnapshot.empty) {
+      await interaction.editReply({
+        content: `❌ **No approved member found**\n\nNo approved membership found for email: \`${email}\`\n\n**Possible reasons:**\n• Email address is incorrect\n• Member is not approved yet\n• Member doesn't exist in database\n\n**Tip:** Use \`/member-list status:approved\` to see all approved members`
+      });
+      return;
+    }
+
+    const memberData = memberSnapshot.docs[0].data();
+
+    // Check if this email is already connected to someone else
+    if (memberData.discordUserId && memberData.discordUserId !== targetUser.id) {
+      await interaction.editReply({
+        content: `❌ **Email already connected**\n\n**Email:** ${email}\n**Already connected to:** ${memberData.discordUsername || 'Unknown user'} (ID: ${memberData.discordUserId})\n\n**Options:**\n• Use different email address\n• Contact that user to resolve conflict\n• Update database manually if needed`
+      });
+      return;
+    }
+
+    // Check if target user already has member role
+    const alreadyMember = targetMember.roles.cache.has(MEMBER_ROLE_ID);
+
+    // Update or create the verification
+    await firebaseDb.collection('membershipApplications').doc(memberSnapshot.docs[0].id).update({
+      discordUserId: targetUser.id,
+      discordUsername: targetUser.username,
+      discordVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+      verifiedBy: interaction.user.username,
+      adminVerification: true
+    });
+
+    let actionsTaken = [];
+
+    // Assign member role if not already assigned
+    if (!alreadyMember) {
+      await targetMember.roles.add(MEMBER_ROLE_ID);
+      actionsTaken.push('✅ Added member role');
+    }
+
+    // Add permissions to both private channels
+    try {
+      // 1. Add to main mas-members channel
+      const membersChannel = await interaction.guild.channels.fetch(MEMBERS_CHANNEL_ID);
+      if (membersChannel) {
+        await membersChannel.permissionOverwrites.edit(targetUser.id, {
+          ViewChannel: true,
+          SendMessages: true,
+          ReadMessageHistory: true
+        });
+        actionsTaken.push('✅ Added access to main members channel');
+      }
+
+      // 2. Add to mas-members forum
+      await addToMembersForumChannel(targetUser, interaction.guild);
+      actionsTaken.push('✅ Added access to members forum');
+
+      // Send welcome message to main members channel
+      await sendMembersChannelWelcome(memberData, targetUser);
+      actionsTaken.push('✅ Welcome message sent to members channel');
+
+    } catch (channelError) {
+      console.error('⚠️ Failed to add admin-verified user to private channels:', channelError);
+      actionsTaken.push('⚠️ Channel access setup had some issues (check logs)');
+    }
+
+    // Create success embed
+    const embed = {
+      title: '🎉 Admin Verification Successful!',
+      description: `**${targetUser.username}** has been manually verified by admin`,
+      color: 0x00ff00,
+      fields: [
+        {
+          name: '👤 Member Info',
+          value: `**Name:** ${memberData.fullName || memberData.name || 'Unknown'}\n**Email:** ${email}\n**Discord:** ${targetUser.username}`,
+          inline: true
+        },
+        {
+          name: '🔧 Actions Taken',
+          value: actionsTaken.join('\n'),
+          inline: true
+        },
+        {
+          name: '📊 Status',
+          value: `**Before:** ${alreadyMember ? 'Already verified' : 'Unverified'}\n**After:** Fully verified with channel access\n**Verified by:** ${interaction.user.username}`,
+          inline: false
+        }
+      ],
+      footer: {
+        text: "🔐 Admin Verification • MAS Member Management",
+        icon_url: "https://manipurastronomy.org/logo.png"
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    await interaction.editReply({
+      embeds: [embed]
+    });
+
+    // Log the admin verification
+    console.log(`👑 Admin verification: ${targetUser.username} (${targetUser.id}) verified with ${email} by ${interaction.user.username}`);
+
+  } catch (error) {
+    console.error('❌ Admin verify command error:', error);
+    await interaction.editReply({
+      content: '❌ Failed to verify member. Please try again.',
+    });
+  }
+}
+
 async function handlePollCommand(interaction) {
   try {
     // Check admin permissions
@@ -1803,13 +2653,14 @@ async function handleListAdminsCommand(interaction) {
     }
 
     let adminsList = '👑 **Current MAS Bot Admins**\n\n';
+    let adminNumber = 1;
 
-    adminsSnapshot.forEach((doc, index) => {
+    adminsSnapshot.forEach((doc) => {
       const admin = doc.data();
       const addedDate = admin.addedAt ? new Date(admin.addedAt.toDate()).toLocaleDateString() : 'Unknown';
       const superAdminBadge = admin.isSuperAdmin ? ' 🔴 **SUPER ADMIN**' : '';
 
-      adminsList += `**${index + 1}. ${admin.displayName || admin.username}**${superAdminBadge}\n`;
+      adminsList += `**${adminNumber}. ${admin.displayName || admin.username}**${superAdminBadge}\n`;
       adminsList += `   • Username: @${admin.username}\n`;
       adminsList += `   • User ID: \`${admin.userId}\`\n`;
       adminsList += `   • Added: ${addedDate}\n`;
@@ -1818,6 +2669,7 @@ async function handleListAdminsCommand(interaction) {
         adminsList += `   • Notes: ${admin.notes}\n`;
       }
       adminsList += `\n`;
+      adminNumber++;
     });
 
     // Add note about other admin sources
@@ -2412,6 +3264,367 @@ async function handleAstronomerCommand(interaction) {
       content: '❌ Failed to load astronomer information. Please try again.',
       ephemeral: true
     });
+  }
+}
+
+async function handleResourcesCommand(interaction) {
+  try {
+    const resourceType = interaction.options.getString('type') || 'general';
+    const resources = educationalResources[resourceType] || educationalResources.general;
+
+    const embed = {
+      title: `📚 Educational Resources: ${resourceType.charAt(0).toUpperCase() + resourceType.slice(1)}`,
+      description: `Here are free astronomy educational resources for ${resourceType === 'general' ? 'general learning' : resourceType}:`,
+      color: 0x3b82f6, // Blue color
+      fields: resources.map(resource => ({
+        name: `🔗 ${resource.name}`,
+        value: `${resource.description}\n**Type:** ${resource.type}\n**Link:** [Visit Resource](${resource.url})`,
+        inline: false
+      })),
+      footer: {
+        text: "📖 All resources are free and publicly available • MAS",
+        icon_url: "https://manipurastronomy.org/logo.png"
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    // Add helpful note
+    embed.fields.push({
+      name: "💡 Pro Tip",
+      value: "Most NASA content is in the public domain, and IAU resources are Creative Commons licensed. Perfect for students and researchers!",
+      inline: false
+    });
+
+    await interaction.reply({
+      embeds: [embed]
+    });
+
+    console.log(`📚 Educational resources (${resourceType}) sent to ${interaction.user.username}`);
+
+  } catch (error) {
+    console.error('❌ Resources command error:', error);
+    await interaction.reply({
+      content: '❌ Failed to load educational resources. Please try again.',
+      ephemeral: true
+    });
+  }
+}
+
+// Send notification to private members forum and give access
+async function addToMembersForumChannel(discordUser, guild) {
+  try {
+    // Get the forum channel
+    const forumChannel = await guild.channels.fetch(MEMBERS_FORUM_CHANNEL_ID);
+    if (!forumChannel) {
+      console.error('❌ Members forum channel not found');
+      return false;
+    }
+
+    // Add user permission to see the channel
+    try {
+      await forumChannel.permissionOverwrites.edit(discordUser.id, {
+        ViewChannel: true,
+        SendMessages: true,
+        ReadMessageHistory: true,
+        CreatePublicThreads: true,
+        CreatePrivateThreads: true,
+        SendMessagesInThreads: true
+      });
+      console.log(`✅ Added forum permissions for ${discordUser.username}`);
+    } catch (permError) {
+      console.error(`⚠️ Could not set forum permissions for ${discordUser.username}:`, permError.message);
+      // Continue anyway - they might already have access through role
+    }
+
+    // Send a welcome message via webhook (will be visible since user now has access)
+    const welcomeData = {
+      content: `🎉 Welcome ${discordUser.username} to the exclusive MAS Members Forum! Feel free to start discussions, ask questions, and share your astronomy interests here. 🌟`,
+      username: "MAS Welcome Bot",
+      avatar_url: "https://manipurastronomy.org/logo.png"
+    };
+
+    const response = await fetch(MEMBERS_FORUM_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(welcomeData)
+    });
+
+    if (response.ok) {
+      console.log(`✅ Welcome message sent to members forum for ${discordUser.username}`);
+      return true;
+    } else {
+      console.error('❌ Failed to send welcome message to forum:', response.status);
+      return false;
+    }
+  } catch (error) {
+    console.error('❌ Error adding user to members forum:', error);
+    return false;
+  }
+}
+
+// Send welcome message to private members channel
+async function sendMembersChannelWelcome(memberData, discordUser) {
+  try {
+    const welcomeEmbed = {
+      embeds: [{
+        title: "🎉 New Member Verified!",
+        description: `Welcome ${memberData.fullName || memberData.name} to the **exclusive MAS Members area**!`,
+        color: 0x00ff00,
+        fields: [
+          {
+            name: "👤 Member Info",
+            value: `**Name:** ${memberData.fullName || memberData.name}\n**Discord:** ${discordUser.username}\n**Location:** ${memberData.city || 'N/A'}, ${memberData.state || 'N/A'}`,
+            inline: true
+          },
+          {
+            name: "🔬 Background",
+            value: `**Experience:** ${memberData.astronomyExperience || 'N/A'}\n**Field:** ${memberData.fieldOfStudy || memberData.occupation || 'N/A'}\n**Organization:** ${memberData.organization || 'N/A'}`,
+            inline: true
+          },
+          {
+            name: "🌟 Welcome Message",
+            value: `${discordUser.username} has successfully verified their MAS membership and now has access to all exclusive member benefits! Feel free to introduce yourself and share your astronomy interests! 🌌`,
+            inline: false
+          }
+        ],
+        footer: {
+          text: "🔐 MAS Members Only • Manipur Astronomical Society",
+          icon_url: "https://manipurastronomy.org/logo.png"
+        },
+        timestamp: new Date().toISOString()
+      }]
+    };
+
+    const response = await fetch(MEMBERS_WEBHOOK_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(welcomeEmbed)
+    });
+
+    if (response.ok) {
+      console.log(`✅ Welcome message sent to members channel for ${discordUser.username}`);
+      return true;
+    } else {
+      console.error('❌ Failed to send welcome message to members channel:', response.status);
+      return false;
+    }
+  } catch (error) {
+    console.error('❌ Error sending welcome message to members channel:', error);
+    return false;
+  }
+}
+
+// Email for already approved members (different from new approval email)
+async function sendDiscordInviteEmail(memberData) {
+  if (!emailTransporter) {
+    console.log('📧 Email not configured - skipping Discord invite email');
+    return false;
+  }
+
+  try {
+    const emailContent = {
+      from: `"${EMAIL_FROM_NAME}" <${EMAIL_USER}>`,
+      to: memberData.email,
+      subject: '🔥 Your MAS Membership is Active - Join Discord Now!',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+            .discord-section { background: #5865f2; color: white; padding: 20px; border-radius: 10px; margin: 20px 0; }
+            .steps { background: white; padding: 20px; border-radius: 10px; margin: 20px 0; }
+            .step { margin: 15px 0; padding: 10px; background: #e8f5e8; border-left: 4px solid #28a745; }
+            .discord-invite { display: inline-block; background: #ffffff; color: #5865f2; padding: 15px 30px; text-decoration: none; border-radius: 8px; margin: 15px 0; font-weight: bold; font-size: 18px; border: 3px solid #5865f2; box-shadow: 0 4px 8px rgba(0,0,0,0.2); transition: all 0.3s ease; }
+            .footer { text-align: center; color: #666; margin-top: 30px; }
+            .urgent { background: #ff6b6b; color: white; padding: 15px; border-radius: 8px; margin: 20px 0; text-align: center; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>⭐ You're Already a MAS Member!</h1>
+              <p>Time to unlock your exclusive Discord access</p>
+            </div>
+
+            <div class="content">
+              <h2>Hello ${memberData.fullName || memberData.name}! 👋</h2>
+
+              <div class="urgent">
+                <h3>🚨 MISSING OUT: You Haven't Joined Our Discord Yet!</h3>
+                <p><strong>Your membership is active, but you're missing exclusive member benefits!</strong></p>
+              </div>
+
+              <p>Your <strong>Manipur Astronomical Society</strong> membership was approved, but we noticed you haven't joined our exclusive Discord community yet. You're missing out on amazing member-only content!</p>
+
+              <div class="discord-section">
+                <h3>🔓 UNLOCK Your Member-Only Access!</h3>
+                <p><strong>⚠️ EXCLUSIVE CONTENT WAITING</strong> - Access premium features that public users can't see!</p>
+                <a href="https://discord.gg/9Tg3PGT8" class="discord-invite">JOIN DISCORD NOW</a>
+              </div>
+
+              <div class="steps">
+                <h3>🚀 Quick Setup (Takes 2 Minutes):</h3>
+                <div class="step">
+                  <strong>Step 1:</strong> Click "JOIN DISCORD NOW" above
+                </div>
+                <div class="step">
+                  <strong>Step 2:</strong> Once in Discord, type: <code>/verify ${memberData.email}</code>
+                </div>
+                <div class="step">
+                  <strong>Step 3:</strong> INSTANTLY unlock all exclusive member benefits!
+                </div>
+              </div>
+
+              <h3>🔥 What You're Missing Out On:</h3>
+              <ul>
+                <li>🔒 <strong>Private Members Channels</strong> - Exclusive discussions and insider content</li>
+                <li>💬 <strong>Private Members Forum</strong> - Post topics and engage in deep discussions</li>
+                <li>🎯 <strong>Priority Event Access</strong> - First access to telescope sessions and stargazing events</li>
+                <li>📚 <strong>Premium Learning Resources</strong> - Advanced guides and research papers</li>
+                <li>👨‍🚀 <strong>Expert Mentorship</strong> - Direct access to experienced astronomers</li>
+                <li>🛰️ <strong>Real-time Space Alerts</strong> - ISS passes, meteor showers, celestial events</li>
+                <li>🎁 <strong>Member-Only Giveaways</strong> - Exclusive astronomy equipment contests</li>
+                <li>📸 <strong>Astrophotography Club</strong> - Share photos and get professional feedback</li>
+                <li>🌌 <strong>Research Opportunities</strong> - Join real astronomy research projects</li>
+              </ul>
+
+              <div class="urgent">
+                <p><strong>⏰ Don't Wait!</strong> Other members are already enjoying these exclusive benefits. Join them today!</p>
+              </div>
+
+              <p><strong>Questions?</strong> Just reply to this email or message any admin in Discord.</p>
+
+              <p>Clear skies ahead! 🌌</p>
+
+              <div class="footer">
+                <p><strong>Manipur Astronomical Society</strong><br>
+                🌐 Website: https://manipurastronomy.org<br>
+                💬 Discord: https://discord.gg/9Tg3PGT8</p>
+              </div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+
+    await emailTransporter.sendMail(emailContent);
+    console.log(`📧 Discord invite email sent to ${memberData.email}`);
+    return true;
+
+  } catch (error) {
+    console.error('❌ Failed to send Discord invite email:', error);
+    return false;
+  }
+}
+
+// Email notification function (for newly approved members)
+async function sendWelcomeEmail(memberData) {
+  if (!emailTransporter) {
+    console.log('📧 Email not configured - skipping welcome email');
+    return false;
+  }
+
+  try {
+    const emailContent = {
+      from: `"${EMAIL_FROM_NAME}" <${EMAIL_USER}>`,
+      to: memberData.email,
+      subject: '🎉 Welcome to Manipur Astronomical Society!',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+            .content { background: #f9f9f9; padding: 30px; border-radius: 0 0 10px 10px; }
+            .discord-section { background: #5865f2; color: white; padding: 20px; border-radius: 10px; margin: 20px 0; }
+            .steps { background: white; padding: 20px; border-radius: 10px; margin: 20px 0; }
+            .step { margin: 15px 0; padding: 10px; background: #e8f5e8; border-left: 4px solid #28a745; }
+            .discord-invite { display: inline-block; background: #ffffff; color: #5865f2; padding: 15px 30px; text-decoration: none; border-radius: 8px; margin: 15px 0; font-weight: bold; font-size: 18px; border: 3px solid #5865f2; box-shadow: 0 4px 8px rgba(0,0,0,0.2); transition: all 0.3s ease; }
+            .footer { text-align: center; color: #666; margin-top: 30px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>🌟 Welcome to MAS!</h1>
+              <p>Your membership has been approved</p>
+            </div>
+
+            <div class="content">
+              <h2>Hello ${memberData.fullName || memberData.name}! 👋</h2>
+
+              <p>Congratulations! Your application to join the <strong>Manipur Astronomical Society</strong> has been approved by our admin team.</p>
+
+              <div class="discord-section">
+                <h3>🚀 Join Our EXCLUSIVE Discord Community!</h3>
+                <p><strong>⚠️ MEMBERS ONLY ACCESS</strong> - Connect with fellow astronomy enthusiasts and unlock premium features that public users can't access!</p>
+                <a href="https://discord.gg/9Tg3PGT8" class="discord-invite">Join MAS Discord NOW</a>
+              </div>
+
+              <div class="steps">
+                <h3>🔧 IMPORTANT: Complete Your Setup!</h3>
+                <div class="step">
+                  <strong>Step 1:</strong> Click the Discord link above to join our server
+                </div>
+                <div class="step">
+                  <strong>Step 2:</strong> Once in Discord, use the command: <code>/verify ${memberData.email}</code>
+                </div>
+                <div class="step">
+                  <strong>Step 3:</strong> Get INSTANT access to exclusive member-only channels and premium content!
+                </div>
+              </div>
+
+              <h3>🔥 EXCLUSIVE Member Benefits (Not Available to Public!):</h3>
+              <ul>
+                <li>🔒 <strong>Private Members Channels</strong> - Direct access to exclusive discussions and insider content</li>
+                <li>💬 <strong>Private Members Forum</strong> - Participate in ongoing discussions and post your own topics</li>
+                <li>🎯 <strong>Priority Event Access</strong> - Get first dibs on limited telescope sessions and stargazing events</li>
+                <li>📚 <strong>Premium Learning Resources</strong> - Advanced astrophotography guides, research papers, and educational content</li>
+                <li>👨‍🚀 <strong>Expert Mentorship</strong> - Direct interaction with experienced astronomers and researchers</li>
+                <li>🛰️ <strong>Real-time Alerts</strong> - Instant notifications for ISS passes, meteor showers, and rare celestial events</li>
+                <li>🎁 <strong>Member-Only Giveaways</strong> - Exclusive access to astronomy equipment and book giveaways</li>
+                <li>📸 <strong>Astrophotography Club</strong> - Share your captures and get professional feedback</li>
+                <li>🌌 <strong>Research Collaborations</strong> - Join ongoing astronomy research projects and contribute to real science</li>
+              </ul>
+
+              <p><strong>🚨 Don't Miss Out!</strong> Public users only see basic content. As a verified member, you get access to everything MAS has to offer.</p>
+
+              <p><strong>Need help?</strong> Just message any admin in Discord or reply to this email.</p>
+
+              <p>Clear skies ahead! 🌌</p>
+
+              <div class="footer">
+                <p><strong>Manipur Astronomical Society</strong><br>
+                🌐 Website: https://manipurastronomy.org<br>
+                💬 Discord: https://discord.gg/9Tg3PGT8</p>
+              </div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `
+    };
+
+    await emailTransporter.sendMail(emailContent);
+    console.log(`📧 Welcome email sent to ${memberData.email}`);
+    return true;
+
+  } catch (error) {
+    console.error('❌ Failed to send welcome email:', error);
+    return false;
   }
 }
 
