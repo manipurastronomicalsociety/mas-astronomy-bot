@@ -28,26 +28,31 @@ const FIREBASE_CONFIG = process.env.FIREBASE_SERVICE_ACCOUNT ? JSON.parse(proces
 const MANIPUR_LAT = 24.8170;
 const MANIPUR_LON = 93.9368;
 
-// Get current ISS position
+// Get current ISS position (using the same API as MAS website)
 async function getISSPosition() {
   try {
-    const response = await fetch('http://api.open-notify.org/iss-now.json');
-    const data = await response.json();
+    const response = await fetch('https://api.wheretheiss.at/v1/satellites/25544');
 
-    if (data.message === 'success') {
-      const lat = parseFloat(data.iss_position.latitude);
-      const lon = parseFloat(data.iss_position.longitude);
-
-      // Calculate distance from Manipur
-      const distance = calculateDistance(MANIPUR_LAT, MANIPUR_LON, lat, lon);
-
-      return {
-        latitude: lat,
-        longitude: lon,
-        distance: Math.round(distance),
-        timestamp: new Date(data.timestamp * 1000)
-      };
+    if (!response.ok) {
+      console.error(`ISS Position API returned status: ${response.status}`);
+      return null;
     }
+
+    const data = await response.json();
+    console.log(`🛰️ ISS Position API Response: Lat: ${data.latitude}, Lon: ${data.longitude}`);
+
+    const lat = parseFloat(data.latitude);
+    const lon = parseFloat(data.longitude);
+
+    // Calculate distance from Manipur (same formula as website)
+    const distance = calculateDistance(MANIPUR_LAT, MANIPUR_LON, lat, lon);
+
+    return {
+      latitude: lat,
+      longitude: lon,
+      distance: Math.round(distance),
+      timestamp: new Date()
+    };
   } catch (error) {
     console.error('Error fetching ISS position:', error);
     return null;
@@ -58,7 +63,16 @@ async function getISSPosition() {
 async function getNextISSPass() {
   try {
     const response = await fetch(`http://api.open-notify.org/iss-pass.json?lat=${MANIPUR_LAT}&lon=${MANIPUR_LON}&n=1`);
-    const data = await response.json();
+
+    if (!response.ok) {
+      console.error(`ISS Pass API returned status: ${response.status}`);
+      return null;
+    }
+
+    const text = await response.text();
+    console.log(`🛰️ ISS Pass API Response: ${text.substring(0, 100)}...`);
+
+    const data = JSON.parse(text);
 
     if (data.message === 'success' && data.response.length > 0) {
       const pass = data.response[0];
@@ -88,10 +102,17 @@ async function getNextISSPass() {
 // Get NASA Astronomy Picture of the Day
 async function getNASAAPOD() {
   try {
-    const response = await fetch(`https://api.nasa.gov/planetary/apod?api_key=${NASA_API_KEY}`);
+    const response = await fetch(`https://api.nasa.gov/planetary/apod?api_key=${NASA_API_KEY}`, {
+      headers: {
+        'User-Agent': 'MAS-Astronomy-Bot/1.0 (Manipur Astronomical Society)'
+      }
+    });
     const data = await response.json();
 
     if (data.title) {
+      console.log(`🌍 NASA APOD fetched: ${data.title}`);
+      console.log(`📅 Date: ${data.date}, Media: ${data.media_type}`);
+
       return {
         title: data.title,
         explanation: data.explanation,
@@ -163,7 +184,16 @@ async function getMoonPhase() {
 async function getAstronautsInSpace() {
   try {
     const response = await fetch('http://api.open-notify.org/astros.json');
-    const data = await response.json();
+
+    if (!response.ok) {
+      console.error(`Astronauts API returned status: ${response.status}`);
+      return null;
+    }
+
+    const text = await response.text();
+    console.log(`👨‍🚀 Astronauts API Response: ${text.substring(0, 100)}...`);
+
+    const data = JSON.parse(text);
 
     if (data.message === 'success') {
       return {
@@ -189,9 +219,229 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// Get moon observing tips based on phase
+function getMoonObservingTip(phaseName) {
+  switch (phaseName) {
+    case 'New Moon': return 'Deep sky objects & galaxies';
+    case 'Waxing Crescent': return 'Evening lunar craters';
+    case 'First Quarter': return 'Lunar mountains & valleys';
+    case 'Waxing Gibbous': return 'Detailed lunar surface';
+    case 'Full Moon': return 'Bright night photography';
+    case 'Waning Gibbous': return 'Late night observing';
+    case 'Last Quarter': return 'Early morning viewing';
+    case 'Waning Crescent': return 'Pre-dawn lunar features';
+    default: return 'Night sky exploration';
+  }
+}
+
+// Inspiring astronomy quotes
+const astronomyQuotes = [
+  { quote: "The cosmos is within us. We are made of star-stuff.", author: "Carl Sagan" },
+  { quote: "Two things are infinite: the universe and human stupidity; and I'm not sure about the universe.", author: "Albert Einstein" },
+  { quote: "Look up at the stars and not down at your feet.", author: "Stephen Hawking" },
+  { quote: "The universe is not only stranger than we imagine, it is stranger than we can imagine.", author: "J.B.S. Haldane" },
+  { quote: "Space is big. You just won't believe how vastly, hugely, mind-bogglingly big it is.", author: "Douglas Adams" },
+  { quote: "We are all in the gutter, but some of us are looking at the stars.", author: "Oscar Wilde" },
+  { quote: "The sky is not the limit, it's just the beginning.", author: "Unknown" },
+  { quote: "Astronomy is humbling and character-building.", author: "Carl Sagan" },
+  { quote: "The Earth is the cradle of humanity, but mankind cannot stay in the cradle forever.", author: "Konstantin Tsiolkovsky" },
+  { quote: "I have loved the stars too fondly to be fearful of the night.", author: "Sarah Williams" },
+  { quote: "The universe is a pretty big place. If it's just us, seems like an awful waste of space.", author: "Carl Sagan" },
+  { quote: "Keep looking up. I learn from the past, dream about the future, and look up.", author: "Neil deGrasse Tyson" },
+  { quote: "The stars are the jewels of the night, and perchance surpass anything which day has to show.", author: "Henry David Thoreau" },
+  { quote: "Science is not only a disciple of reason but also one of romance and passion.", author: "Stephen Hawking" },
+  { quote: "The important thing is not to stop questioning.", author: "Albert Einstein" }
+];
+
+// Get random daily quote based on date (same quote for whole day)
+function getDailyQuote() {
+  const today = new Date();
+  const dayOfYear = Math.floor((today - new Date(today.getFullYear(), 0, 0)) / 1000 / 60 / 60 / 24);
+  const quoteIndex = dayOfYear % astronomyQuotes.length;
+  return astronomyQuotes[quoteIndex];
+}
+
+// ===== FUN INTERACTIVE FEATURES =====
+
+// Space jokes database
+const spaceJokes = [
+  "Why didn't the sun go to college? Because it already had a million degrees!",
+  "How do you organize a space party? You planet!",
+  "What did Mars say to Saturn? Give me a ring sometime!",
+  "Why didn't the asteroid hit the moon? It was a miss-ile!",
+  "What do you call a tick on the moon? A luna-tick!",
+  "How do you get a baby astronaut to sleep? You rocket!",
+  "Why didn't aliens ever land at airports? They were looking for space!",
+  "What's an astronaut's favorite part of a computer? The space bar!",
+  "Why did the star go to school? To get brighter!",
+  "What do you call an alien with three eyes? An aliiien!",
+  "How does the solar system hold up its pants? With an asteroid belt!",
+  "What did Earth say to the other planets? You guys have no life!",
+  "Why don't aliens ever visit our solar system? They looked at the reviews and we only have one star!",
+  "What's a light-year? The same as a regular year, but with fewer calories!",
+  "Why did the astronaut break up with the moon? Because she needed some space!",
+  "What do you call a robot that takes the long way around? R2-Detour!",
+  "How do you organize a party in space? You planet ahead!",
+  "Why don't aliens ever eat lunch? They prefer space food!",
+  "What's an astronaut's favorite chocolate? A Mars bar!",
+  "Why did Pluto get kicked out of the solar system? It wasn't meeting its orbit requirements!"
+];
+
+// Planet orbital periods (in Earth years)
+const planetData = {
+  Mercury: { period: 0.24, emoji: "☿️", fact: "closest to the Sun" },
+  Venus: { period: 0.62, emoji: "♀️", fact: "hottest planet" },
+  Mars: { period: 1.88, emoji: "♂️", fact: "the red planet" },
+  Jupiter: { period: 11.86, emoji: "♃", fact: "largest planet" },
+  Saturn: { period: 29.46, emoji: "♄", fact: "has beautiful rings" },
+  Uranus: { period: 84.01, emoji: "♅", fact: "tilted on its side" },
+  Neptune: { period: 164.8, emoji: "♆", fact: "windiest planet" }
+};
+
+// NASA space sounds (public domain)
+const spaceSounds = [
+  {
+    name: "Saturn's Radio Emissions",
+    url: "https://archive.org/download/NASASoundofSaturn/Saturn.mp3",
+    description: "Eerie radio waves from Saturn's magnetosphere"
+  },
+  {
+    name: "Jupiter's Sounds",
+    url: "https://www.nasa.gov/wav/144208main_Jupiter1.wav",
+    description: "Radio emissions from Jupiter captured by Voyager"
+  },
+  {
+    name: "Apollo 11 Launch",
+    url: "https://www.nasa.gov/wav/84869main_liftoff.wav",
+    description: "The roar of Saturn V rocket launching to the Moon"
+  },
+  {
+    name: "Sputnik Beep",
+    url: "https://www.nasa.gov/wav/84865main_sputnik-beep.wav",
+    description: "Historic beeping from the first artificial satellite"
+  },
+  {
+    name: "Solar Wind",
+    url: "https://www.nasa.gov/wav/84866main_wind.wav",
+    description: "The sound of solar particles hitting spacecraft"
+  }
+];
+
+// Famous astronomers database
+const astronomers = [
+  {
+    name: "Carl Sagan",
+    era: "1934-1996",
+    achievement: "Popularized astronomy through Cosmos TV series",
+    quote: "The cosmos is within us. We are made of star-stuff.",
+    emoji: "🌌"
+  },
+  {
+    name: "Galileo Galilei",
+    era: "1564-1642",
+    achievement: "First to use telescope for astronomy, discovered Jupiter's moons",
+    quote: "And yet it moves! (referring to Earth orbiting the Sun)",
+    emoji: "🔭"
+  },
+  {
+    name: "Edwin Hubble",
+    era: "1889-1953",
+    achievement: "Discovered the expansion of the universe",
+    quote: "Equipped with his five senses, man explores the universe.",
+    emoji: "🌌"
+  },
+  {
+    name: "Stephen Hawking",
+    era: "1942-2018",
+    achievement: "Revolutionary work on black holes and cosmology",
+    quote: "Look up at the stars and not down at your feet.",
+    emoji: "🕳️"
+  },
+  {
+    name: "Marie Curie",
+    era: "1867-1934",
+    achievement: "Pioneer in radioactivity research, first woman Nobel Prize winner",
+    quote: "Nothing in life is to be feared, it is only to be understood.",
+    emoji: "⚛️"
+  },
+  {
+    name: "Neil deGrasse Tyson",
+    era: "1958-present",
+    achievement: "Modern science communicator and astrophysicist",
+    quote: "The universe is under no obligation to make sense to you.",
+    emoji: "🌟"
+  },
+  {
+    name: "Copernicus",
+    era: "1473-1543",
+    achievement: "Proposed heliocentric model of solar system",
+    quote: "Mathematics is written for mathematicians.",
+    emoji: "☀️"
+  },
+  {
+    name: "Johannes Kepler",
+    era: "1571-1630",
+    achievement: "Discovered laws of planetary motion",
+    quote: "The diversity of the phenomena of nature is so great.",
+    emoji: "🪐"
+  },
+  {
+    name: "Isaac Newton",
+    era: "1643-1727",
+    achievement: "Laws of motion and universal gravitation",
+    quote: "I can calculate the motion of heavenly bodies, but not the madness of people.",
+    emoji: "🍎"
+  },
+  {
+    name: "Katherine Johnson",
+    era: "1918-2020",
+    achievement: "NASA mathematician who calculated trajectories for moon missions",
+    quote: "I counted everything. I counted the steps, the dishes, the stars in the sky.",
+    emoji: "🚀"
+  }
+];
+
+// Helper functions for interactive commands
+function getRandomJoke() {
+  return spaceJokes[Math.floor(Math.random() * spaceJokes.length)];
+}
+
+function calculatePlanetAge(earthAge, planet) {
+  const planetInfo = planetData[planet];
+  if (!planetInfo) return null;
+
+  const planetAge = (earthAge / planetInfo.period).toFixed(1);
+  return {
+    age: planetAge,
+    emoji: planetInfo.emoji,
+    fact: planetInfo.fact
+  };
+}
+
+function getRandomSpaceSound() {
+  return spaceSounds[Math.floor(Math.random() * spaceSounds.length)];
+}
+
+function getRandomAstronomer() {
+  return astronomers[Math.floor(Math.random() * astronomers.length)];
+}
+
+// Track last post to prevent duplicates
+let lastPostTime = 0;
+
 // Send daily astronomy content to Discord
 async function sendDailyContent() {
+  const now = Date.now();
+  const timeSinceLastPost = now - lastPostTime;
+
+  // Prevent duplicate posts within 5 minutes (300,000 ms)
+  if (timeSinceLastPost < 300000 && lastPostTime > 0) {
+    console.log(`⏰ Skipping duplicate post - only ${Math.round(timeSinceLastPost / 1000)} seconds since last post`);
+    return;
+  }
+
   console.log('🚀 Fetching daily astronomy content...');
+  lastPostTime = now;
 
   try {
     // Fetch all data in parallel
@@ -203,52 +453,106 @@ async function sendDailyContent() {
       getAstronautsInSpace()
     ]);
 
-    // Create Discord embed
+    // Create Discord embed with better design
     const embed = {
       title: "🌌 Daily Astronomy Update",
-      description: "Your daily dose of cosmic wonders!",
-      color: 3447003, // Blue color
+      description: "✨ **Your daily dose of cosmic wonders from Manipur!** ✨",
+      color: 0x4f46e5, // Modern indigo color
       fields: [],
       footer: {
-        text: "Manipur Astronomical Society • Data from NASA & Open Notify APIs"
+        text: "🔭 Manipur Astronomical Society • 🌍 Imphal, Manipur • 📡 Live Data",
+        icon_url: "https://manipurastronomy.org/logo.png"
       },
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      thumbnail: {
+        url: "https://manipurastronomy.org/logo.png"
+      }
     };
+
+    // Add a separator field for better organization
+    embed.fields.push({
+      name: "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      value: "🌟 **TODAY'S COSMIC HIGHLIGHTS** 🌟",
+      inline: false
+    });
 
     // Add NASA APOD
     if (apod) {
-      embed.fields.push({
-        name: "🖼️ NASA Astronomy Picture of the Day",
-        value: `**${apod.title}**\n${apod.explanation.length > 200 ? apod.explanation.substring(0, 200) + "..." : apod.explanation}`,
-        inline: false
-      });
+      console.log(`📸 APOD Media Type: ${apod.mediaType}`);
+      console.log(`🔗 APOD URL: ${apod.hdurl || apod.url}`);
 
       if (apod.mediaType === 'image') {
-        embed.image = { url: apod.hdurl || apod.url };
-      }
+        // Discord has issues with NASA APOD images - try multiple approaches
+        const hdImageUrl = apod.hdurl;
+        const regularImageUrl = apod.url;
 
-      if (apod.copyright) {
+        console.log(`🔍 Trying different image URLs:`);
+        console.log(`📸 HD URL: ${hdImageUrl}`);
+        console.log(`📸 Regular URL: ${regularImageUrl}`);
+
+        // Try the regular URL first (sometimes works better than HD)
+        if (regularImageUrl) {
+          embed.image = { url: regularImageUrl };
+          console.log(`✅ Set embed.image.url to regular: ${regularImageUrl}`);
+        }
+
+        // Always provide clickable link as backup
         embed.fields.push({
-          name: "📸 Credit",
-          value: apod.copyright,
+          name: "🖼️ View Today's NASA Image",
+          value: `🔗 [**${apod.title}**](${hdImageUrl || regularImageUrl})\n*Click to view the full image*`,
           inline: true
         });
+
+        // Add image info
+        embed.fields.push({
+          name: "📸 Image Details",
+          value: `📅 **Date:** ${apod.date}\n🎯 **Type:** ${apod.mediaType}${apod.copyright ? `\n👤 **Credit:** ${apod.copyright}` : ''}`,
+          inline: true
+        });
+      } else if (apod.mediaType === 'video') {
+        embed.fields.push({
+          name: "🎥 NASA Video of the Day",
+          value: `[**${apod.title}** - Watch Video](${apod.url})`,
+          inline: false
+        });
+        console.log(`🎥 Added video link: ${apod.url}`);
       }
+
+      embed.fields.push({
+        name: "🖼️ NASA Astronomy Picture of the Day",
+        value: `**${apod.title}**\n\n${apod.explanation.length > 300 ? apod.explanation.substring(0, 300) + "..." : apod.explanation}${apod.copyright ? `\n\n*📸 Credit: ${apod.copyright}*` : ''}`,
+        inline: false
+      });
     }
 
-    // Add ISS Information
+    // Add separator for space tracking section
+    embed.fields.push({
+      name: "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      value: "🛰️ **LIVE SPACE TRACKING** 🛰️",
+      inline: false
+    });
+
+    // ISS and Astronauts in organized layout
     if (issPosition) {
       embed.fields.push({
         name: "🛰️ International Space Station",
-        value: `**Current Location:** ${issPosition.latitude.toFixed(2)}°, ${issPosition.longitude.toFixed(2)}°\n**Distance from Manipur:** ${issPosition.distance.toLocaleString()} km`,
+        value: `📍 **Location:** ${issPosition.latitude.toFixed(1)}°, ${issPosition.longitude.toFixed(1)}°\n📏 **Distance from Manipur:** ${issPosition.distance.toLocaleString()} km\n⚡ **Speed:** 27,600 km/h`,
+        inline: true
+      });
+    } else {
+      console.log('⚠️ ISS position data unavailable');
+      embed.fields.push({
+        name: "🛰️ International Space Station",
+        value: "📡 Location data temporarily unavailable\n*Check back later for live tracking*",
         inline: true
       });
     }
 
-    if (issPass) {
+    // Add Astronauts in Space (simplified)
+    if (astronauts) {
       embed.fields.push({
-        name: "👀 Next ISS Pass Over Manipur",
-        value: `**When:** ${issPass.formattedTime}\n**Duration:** ${issPass.duration} minutes\n🔭 *Look up and wave!*`,
+        name: "👨‍🚀 Crew in Space",
+        value: `🏠 **${astronauts.number} astronauts** aboard ISS\n🌍 Living 400km above Earth\n🔬 Conducting space research`,
         inline: true
       });
     }
@@ -256,35 +560,67 @@ async function sendDailyContent() {
     // Add Moon Phase
     embed.fields.push({
       name: `${moonPhase.phaseEmoji} Moon Phase`,
-      value: `**Current:** ${moonPhase.phaseName}`,
+      value: `🌙 **Tonight:** ${moonPhase.phaseName}\n🔭 **Perfect for:** ${getMoonObservingTip(moonPhase.phaseName)}`,
       inline: true
     });
 
-    // Add Astronauts in Space
-    if (astronauts) {
-      const astronautNames = astronauts.people
-        .map(person => `• ${person.name} (${person.craft})`)
-        .join('\n');
-
+    // ISS Pass information
+    if (issPass) {
       embed.fields.push({
-        name: "👨‍🚀 People Currently in Space",
-        value: `**Total:** ${astronauts.number}\n${astronautNames}`,
+        name: "👀 Next ISS Pass Over Manipur",
+        value: `⏰ **When:** ${issPass.formattedTime}\n⏱️ **Duration:** ${issPass.duration} minutes\n🔭 **Look up and wave!**`,
+        inline: false
+      });
+    } else {
+      console.log('⚠️ ISS pass data unavailable');
+      embed.fields.push({
+        name: "👀 ISS Passes Over Manipur",
+        value: "📅 Pass predictions updating...\n🔭 *ISS passes occur daily - check back soon!*",
         inline: false
       });
     }
 
-    // Add viewing tip
+    // Add final separator and viewing tips
+    embed.fields.push({
+      name: "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      value: "🔭 **STARGAZING GUIDE FOR MANIPUR** 🔭",
+      inline: false
+    });
+
+    // Enhanced viewing tip based on time and moon phase
     const currentHour = new Date().getHours();
     let viewingTip = '';
+    let additionalTips = '';
+
     if (currentHour >= 18 || currentHour <= 6) {
-      viewingTip = "🌃 **Perfect time for stargazing!** Clear skies tonight in Manipur.";
+      viewingTip = "🌃 **Perfect time for stargazing!**";
+      additionalTips = "🏔️ Head to higher elevations around Imphal for clearer skies\n🌡️ Dress warmly - temperatures drop at night";
     } else {
-      viewingTip = "☀️ **Daytime astronomy:** Try observing the Moon if visible, or plan tonight's viewing session.";
+      viewingTip = "☀️ **Daytime astronomy planning:**";
+      additionalTips = "📱 Download stargazing apps to plan tonight's session\n🌙 Check if the Moon is visible during daylight";
+    }
+
+    // Get today's inspiring quote
+    const dailyQuote = getDailyQuote();
+
+    // General viewing tips based on moon phase
+    let viewingAdvice = "";
+    if (moonPhase.phaseName === 'New Moon' || moonPhase.phaseName.includes('Crescent')) {
+      viewingAdvice = "🌑 **Dark sky conditions:** Perfect for deep sky objects\n🔭 Find an open area away from city lights\n⭐ Look for the Milky Way and star clusters";
+    } else {
+      viewingAdvice = "🌝 **Bright moon tonight:** Great for lunar observation\n🔍 Use binoculars to see lunar craters and mountains\n📸 Excellent for moon photography";
     }
 
     embed.fields.push({
-      name: "🔭 Today's Viewing Tip",
-      value: viewingTip,
+      name: viewingTip,
+      value: `${additionalTips}\n\n${viewingAdvice}`,
+      inline: false
+    });
+
+    // Add daily inspiration
+    embed.fields.push({
+      name: "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      value: `✨ **COSMIC INSPIRATION** ✨\n\n*"${dailyQuote.quote}"*\n\n— **${dailyQuote.author}**`,
       inline: false
     });
 
@@ -293,7 +629,7 @@ async function sendDailyContent() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        content: "🌟 **Good morning, space enthusiasts!** Here's your daily astronomy update:",
+        content: "🌟 **Khurumjari, space enthusiasts of Manipur!** 🇮🇳\n✨ Your daily cosmic journey begins now ✨",
         embeds: [embed]
       })
     });
@@ -397,6 +733,16 @@ if (DISCORD_TOKEN && CLIENT_ID && GUILD_ID && MEMBER_ROLE_ID) {
       await handleListWebAdminsCommand(interaction);
     } else if (interaction.commandName === 'update-web-admin') {
       await handleUpdateWebAdminCommand(interaction);
+
+    // ===== FUN INTERACTIVE COMMANDS =====
+    } else if (interaction.commandName === 'spacejoke') {
+      await handleSpaceJokeCommand(interaction);
+    } else if (interaction.commandName === 'yourage') {
+      await handleYourAgeCommand(interaction);
+    } else if (interaction.commandName === 'spacemusic') {
+      await handleSpaceMusicCommand(interaction);
+    } else if (interaction.commandName === 'astronomer') {
+      await handleAstronomerCommand(interaction);
     }
   });
 
@@ -1893,6 +2239,180 @@ function generateSecurePassword() {
 
   // Shuffle the password
   return password.split('').sort(() => 0.5 - Math.random()).join('');
+}
+
+// ===== FUN INTERACTIVE COMMAND HANDLERS =====
+
+async function handleSpaceJokeCommand(interaction) {
+  try {
+    const joke = getRandomJoke();
+
+    const embed = {
+      title: "🚀 Space Joke of the Moment!",
+      description: `*${joke}*`,
+      color: 0x9333ea, // Purple color
+      footer: {
+        text: "😄 Brought to you by MAS • Making space fun!",
+        icon_url: "https://manipurastronomy.org/logo.png"
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    await interaction.reply({
+      embeds: [embed]
+    });
+
+    console.log(`😄 Space joke sent to ${interaction.user.username}`);
+
+  } catch (error) {
+    console.error('❌ Space joke command error:', error);
+    await interaction.reply({
+      content: '❌ Sorry, something went wrong with the joke generator! Try again later.',
+      ephemeral: true
+    });
+  }
+}
+
+async function handleYourAgeCommand(interaction) {
+  try {
+    const earthAge = interaction.options.getInteger('age');
+    const planetName = interaction.options.getString('planet');
+
+    const result = calculatePlanetAge(earthAge, planetName);
+
+    if (!result) {
+      await interaction.reply({
+        content: '❌ Invalid planet selected. Please try again.',
+        ephemeral: true
+      });
+      return;
+    }
+
+    const embed = {
+      title: `${result.emoji} Your Age on ${planetName}`,
+      description: `🌍 **On Earth:** ${earthAge} years old\n${result.emoji} **On ${planetName}:** ${result.age} years old!`,
+      color: 0x3b82f6, // Blue color
+      fields: [
+        {
+          name: "🔬 Fun Fact",
+          value: `${planetName} is ${result.fact}`,
+          inline: true
+        },
+        {
+          name: "⏰ Why the Difference?",
+          value: `${planetName} takes ${planetData[planetName].period} Earth years to complete one orbit around the Sun!`,
+          inline: false
+        }
+      ],
+      footer: {
+        text: "🪐 Powered by MAS • Exploring the cosmos together!",
+        icon_url: "https://manipurastronomy.org/logo.png"
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    await interaction.reply({
+      embeds: [embed]
+    });
+
+    console.log(`🪐 Planet age calculated for ${interaction.user.username}: ${earthAge} Earth years = ${result.age} ${planetName} years`);
+
+  } catch (error) {
+    console.error('❌ Planet age command error:', error);
+    await interaction.reply({
+      content: '❌ Failed to calculate your planetary age. Please try again.',
+      ephemeral: true
+    });
+  }
+}
+
+async function handleSpaceMusicCommand(interaction) {
+  try {
+    const sound = getRandomSpaceSound();
+
+    const embed = {
+      title: "🎵 Sounds from Space",
+      description: `🛰️ **${sound.name}**\n\n${sound.description}`,
+      color: 0x06b6d4, // Cyan color
+      fields: [
+        {
+          name: "🎧 Listen Now",
+          value: `[🔊 **Click here to play audio**](${sound.url})`,
+          inline: false
+        },
+        {
+          name: "📡 About Space Sounds",
+          value: "These are real recordings from NASA missions! Space doesn't carry sound waves, but spacecraft can detect radio emissions and electromagnetic vibrations that we convert to audio.",
+          inline: false
+        }
+      ],
+      footer: {
+        text: "🎵 NASA Public Domain • Curated by MAS",
+        icon_url: "https://manipurastronomy.org/logo.png"
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    await interaction.reply({
+      embeds: [embed]
+    });
+
+    console.log(`🎵 Space sound sent to ${interaction.user.username}: ${sound.name}`);
+
+  } catch (error) {
+    console.error('❌ Space music command error:', error);
+    await interaction.reply({
+      content: '❌ Failed to load space sounds. Please try again.',
+      ephemeral: true
+    });
+  }
+}
+
+async function handleAstronomerCommand(interaction) {
+  try {
+    const astronomer = getRandomAstronomer();
+
+    const embed = {
+      title: `${astronomer.emoji} ${astronomer.name}`,
+      description: `**${astronomer.era}**`,
+      color: 0xf59e0b, // Amber color
+      fields: [
+        {
+          name: "🏆 Major Achievement",
+          value: astronomer.achievement,
+          inline: false
+        },
+        {
+          name: "💭 Famous Quote",
+          value: `*"${astronomer.quote}"*`,
+          inline: false
+        },
+        {
+          name: "🌟 Legacy",
+          value: "This brilliant mind helped expand our understanding of the universe and continues to inspire future generations of astronomers and space enthusiasts!",
+          inline: false
+        }
+      ],
+      footer: {
+        text: "👨‍🚀 Honoring space pioneers • MAS",
+        icon_url: "https://manipurastronomy.org/logo.png"
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    await interaction.reply({
+      embeds: [embed]
+    });
+
+    console.log(`👨‍🚀 Astronomer profile sent to ${interaction.user.username}: ${astronomer.name}`);
+
+  } catch (error) {
+    console.error('❌ Astronomer command error:', error);
+    await interaction.reply({
+      content: '❌ Failed to load astronomer information. Please try again.',
+      ephemeral: true
+    });
+  }
 }
 
 console.log('🚀 MAS Astronomy Bot started!');

@@ -405,7 +405,48 @@ const commands = [
         .setName('settings')
         .setDescription('Permission to access system settings')
         .setRequired(false)
+    ),
+
+  // ===== FUN INTERACTIVE COMMANDS =====
+
+  new SlashCommandBuilder()
+    .setName('spacejoke')
+    .setDescription('Get a random space-themed joke to brighten your day! 🚀😄'),
+
+  new SlashCommandBuilder()
+    .setName('yourage')
+    .setDescription('Calculate your age on different planets in our solar system!')
+    .addIntegerOption(option =>
+      option
+        .setName('age')
+        .setDescription('Your age in Earth years')
+        .setRequired(true)
+        .setMinValue(1)
+        .setMaxValue(150)
     )
+    .addStringOption(option =>
+      option
+        .setName('planet')
+        .setDescription('Choose a planet to calculate your age on')
+        .setRequired(true)
+        .addChoices(
+          { name: '☿️ Mercury', value: 'Mercury' },
+          { name: '♀️ Venus', value: 'Venus' },
+          { name: '♂️ Mars', value: 'Mars' },
+          { name: '♃ Jupiter', value: 'Jupiter' },
+          { name: '♄ Saturn', value: 'Saturn' },
+          { name: '♅ Uranus', value: 'Uranus' },
+          { name: '♆ Neptune', value: 'Neptune' }
+        )
+    ),
+
+  new SlashCommandBuilder()
+    .setName('spacemusic')
+    .setDescription('Listen to real sounds from space recorded by NASA! 🎵🛰️'),
+
+  new SlashCommandBuilder()
+    .setName('astronomer')
+    .setDescription('Learn about a famous astronomer and their contributions to science! 👨‍🚀🔭')
 ].map(command => command.toJSON());
 
 const rest = new REST().setToken(DISCORD_TOKEN);
