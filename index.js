@@ -790,13 +790,144 @@ if (DISCORD_TOKEN && CLIENT_ID && GUILD_ID && MEMBER_ROLE_ID) {
 
   // Initialize Discord client
   discordClient = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
+    intents: [
+      GatewayIntentBits.Guilds,
+      GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.GuildMembers  // Required for detecting new members joining
+    ]
   });
 
   // Discord bot event handlers
   discordClient.once('ready', () => {
     console.log(`✅ Discord bot logged in as ${discordClient.user.tag}`);
     console.log('🔐 Member verification system active');
+  });
+
+  // ===== AUTO-WELCOME NEW MEMBERS WITH VERIFICATION INSTRUCTIONS =====
+  discordClient.on('guildMemberAdd', async (member) => {
+    try {
+      console.log(`👋 New member joined: ${member.user.username} (${member.user.id})`);
+
+      // Create clear, organized welcome message with step-by-step instructions
+      const welcomeEmbed = {
+        title: "🌌 Welcome to Manipur Astronomical Society!",
+        description: `Hello **${member.user.username}**! 👋\n\nWelcome to the MAS Discord community! We're excited to have you here.`,
+        color: 0x667eea, // Purple gradient color
+        fields: [
+          {
+            name: "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            value: "**🔐 VERIFIED MEMBERS - UNLOCK EXCLUSIVE ACCESS**",
+            inline: false
+          },
+          {
+            name: "📋 Step 1: Apply for Membership",
+            value: "First, you need to apply on our website:\n🌐 **https://manipurastronomy.org/join**\n\n✅ Fill out the membership form\n⏳ Wait for admin approval (usually 24-48 hours)",
+            inline: false
+          },
+          {
+            name: "✉️ Step 2: Wait for Approval Email",
+            value: "Once approved, you'll receive an email confirmation with your membership details.",
+            inline: false
+          },
+          {
+            name: "🔓 Step 3: Verify on Discord",
+            value: "After approval, come back here and verify with:\n```/verify your-email@example.com```\n⚠️ **Use the SAME email you applied with**",
+            inline: false
+          },
+          {
+            name: "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            value: "**🎁 WHAT YOU GET AFTER VERIFICATION**",
+            inline: false
+          },
+          {
+            name: "🔒 Exclusive Member Benefits",
+            value: "✨ **Private Members Channel** - Exclusive discussions\n💬 **Private Members Forum** - Post your own topics\n🎯 **Priority Event Access** - First access to telescope sessions\n🔭 **Equipment Sharing** - Borrow telescopes & astronomy gear\n📚 **Premium Resources** - Advanced guides & research papers\n👨‍🚀 **Expert Mentorship** - Direct access to astronomers",
+            inline: false
+          },
+          {
+            name: "━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            value: "**❓ NOT A MEMBER YET? NO PROBLEM!**",
+            inline: false
+          },
+          {
+            name: "🌟 Enjoy Public Content",
+            value: "While you decide to join, explore:\n\n📅 `/events` - View upcoming astronomy events\n😄 `/spacejoke` - Get space-themed jokes\n🪐 `/yourage` - Calculate your age on other planets\n🎵 `/spacemusic` - Listen to real NASA space sounds\n👨‍🚀 `/astronomer` - Learn about famous astronomers\n📚 `/resources` - Free astronomy learning resources",
+            inline: false
+          },
+          {
+            name: "🚀 Get Started",
+            value: "• Explore our channels\n• Introduce yourself\n• Ask questions anytime\n• Join us for public stargazing events!",
+            inline: false
+          }
+        ],
+        footer: {
+          text: "🔭 Manipur Astronomical Society • Connecting Manipur to the Cosmos",
+          icon_url: "https://manipurastronomy.org/logo.png"
+        },
+        thumbnail: {
+          url: member.user.displayAvatarURL()
+        },
+        timestamp: new Date().toISOString()
+      };
+
+      // Try sending DM first (best experience)
+      let dmSent = false;
+      try {
+        await member.send({ embeds: [welcomeEmbed] });
+        console.log(`✅ Welcome DM sent to ${member.user.username}`);
+        dmSent = true;
+      } catch (dmError) {
+        console.log(`⚠️ Could not DM ${member.user.username}: ${dmError.message}`);
+      }
+
+      // ALWAYS send a short public welcome in #general (in addition to DM)
+      const generalChannelId = '1420335765988315161'; // #general channel
+      const generalChannel = member.guild.channels.cache.get(generalChannelId);
+
+      if (generalChannel) {
+        // Short, clean public welcome message
+        const publicMessage = dmSent
+          ? `👋 Hello ${member}, welcome to **MAS Discord**!\n\n✅ Already submitted your membership application at https://manipurastronomy.org/join?\n→ Use \`/verify your-email@example.com\` to unlock member-only channels!\n\n❓ Not yet applied?\n→ Submit your application first, then verify here!`
+          : `👋 Welcome ${member}! I've tried to send you important verification instructions via DM.\n\n⚠️ **Didn't get a DM?** Enable "Direct Messages from server members" in your Discord Privacy Settings, then type \`/status\` to see your verification info.\n\n✅ Already applied at https://manipurastronomy.org/join?\n→ Use \`/verify your-email@example.com\` to unlock member channels!`;
+
+        await generalChannel.send({
+          content: publicMessage
+        });
+        console.log(`✅ Public welcome message sent to #general for ${member.user.username}`);
+      }
+
+      // Send full embed only if DM failed
+      if (!dmSent && generalChannel) {
+        await generalChannel.send({
+          embeds: [welcomeEmbed]
+        });
+        console.log(`✅ Full welcome embed sent to #general (DM failed)`);
+      }
+
+      // Optional: Notify admins in admin channel about new member
+      // Uncomment if you want admin notifications:
+      /*
+      const adminChannelId = 'YOUR_ADMIN_CHANNEL_ID';
+      const adminChannel = member.guild.channels.cache.get(adminChannelId);
+      if (adminChannel) {
+        await adminChannel.send({
+          embeds: [{
+            title: "👤 New Member Joined",
+            description: `${member.user.username} (${member.user.tag}) just joined the server!`,
+            color: 0x00ff00,
+            fields: [
+              { name: "User ID", value: member.user.id, inline: true },
+              { name: "Account Created", value: member.user.createdAt.toLocaleDateString(), inline: true }
+            ],
+            timestamp: new Date().toISOString()
+          }]
+        });
+      }
+      */
+
+    } catch (error) {
+      console.error('❌ Error handling new member welcome:', error);
+    }
   });
 
   // Handle slash commands
